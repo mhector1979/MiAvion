@@ -1,6 +1,42 @@
 // Interactive globe on a <canvas>: land, flight arcs, airports and the live plane.
 // Drag to spin. Colors come from CSS custom properties so it follows the theme.
 (function () {
+  // Land color by latitude: ice caps, tundra, boreal and temperate forest,
+  // subtropical deserts and the green equatorial belt.
+  const LAND_RAMP = [
+    [-90, "#F4F8FA"], [-63, "#E8EFF2"], [-56, "#8C9F7A"], [-44, "#6A9550"],
+    [-30, "#B9A26C"], [-20, "#A9965E"], [-12, "#4E8A3C"], [0, "#2E7634"],
+    [10, "#4C8A3A"], [17, "#B79E66"], [24, "#D2B57C"], [32, "#BFA673"],
+    [40, "#7EA057"], [52, "#4D7E44"], [62, "#5E7F52"], [68, "#8D9A7C"],
+    [73, "#D7DFDC"], [78, "#F4F8FA"], [90, "#F7FAFB"],
+  ];
+  function rampColor(lat) {
+    for (let i = 1; i < LAND_RAMP.length; i++) {
+      const [l1, c1] = LAND_RAMP[i];
+      if (lat <= l1) {
+        const [l0, c0] = LAND_RAMP[i - 1];
+        return d3.interpolateRgb(c0, c1)((lat - l0) / (l1 - l0));
+      }
+    }
+    return LAND_RAMP[LAND_RAMP.length - 1][1];
+  }
+  // Latitude bands (as small clockwise polygons) used to paint land.
+  const BAND_STEP = 2.5;
+  const BANDS = [];
+  for (let lat = -90; lat < 90; lat += BAND_STEP) {
+    const polys = [];
+    for (let lon = -180; lon < 180; lon += 90) {
+      const ring = [];
+      // Each band overlaps its neighbors slightly so no seams show between them.
+      const top = Math.min(90, lat + BAND_STEP + 1.2), bottom = Math.max(-90, lat - 0.2);
+      for (let x = lon; x <= lon + 90; x += 10) ring.push([x, top]);
+      for (let x = lon + 90; x >= lon; x -= 10) ring.push([x, bottom]);
+      ring.push(ring[0]);
+      polys.push([ring]);
+    }
+    BANDS.push({ geo: { type: "MultiPolygon", coordinates: polys }, color: rampColor(lat + BAND_STEP / 2) });
+  }
+
   function css(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
@@ -29,9 +65,9 @@
 
     readColors() {
       this.c = {
-        ocean: css("--ocean"), land: css("--land"), coast: css("--coast"),
+        ocean: css("--ocean"), oceanDeep: css("--ocean-deep"), coast: css("--coast"),
         grid: css("--grid"), rim: css("--rim"), fg: css("--fg"), accent: css("--accent"),
-        bg: css("--bg"),
+        bg: css("--bg"), route: css("--route"), under: css("--route-under"),
       };
     }
 
@@ -64,7 +100,7 @@
       this.canvas.width = Math.round(this.w * dpr);
       this.canvas.height = Math.round(this.h * dpr);
       this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      this.scale = Math.min(this.w, this.h) * 0.46 * (this.opts.zoom || 1);
+      this.scale = Math.min(this.w, this.h) * 0.44 * (this.opts.zoom || 1);
       this.proj.translate([this.w / 2, this.h / 2 + (this.opts.offsetY || 0) * this.h]).scale(this.scale);
     }
 
@@ -111,29 +147,36 @@
       const r = proj.scale();
 
       // Atmosphere halo
-      const halo = ctx.createRadialGradient(cx, cy, r * 0.96, cx, cy, r * 1.14);
+      const halo = ctx.createRadialGradient(cx, cy, r * 0.97, cx, cy, r * 1.1);
       halo.addColorStop(0, c.rim);
-      halo.addColorStop(1, "rgba(0,0,0,0)");
+      halo.addColorStop(1, c.rim.replace(/rgba?\(([^,]+),([^,]+),([^,)]+).*$/, "rgba($1,$2,$3,0)"));
       ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(cx, cy, r * 1.14, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, r * 1.1, 0, Math.PI * 2); ctx.fill();
 
-      // Ocean
-      ctx.fillStyle = c.ocean;
+      // Ocean: lighter where the sun hits, deeper toward the edge
+      const sea = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.05, cx, cy, r);
+      sea.addColorStop(0, c.ocean);
+      sea.addColorStop(1, c.oceanDeep);
+      ctx.fillStyle = sea;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
 
       // Graticule
       ctx.beginPath(); path(d3.geoGraticule10());
       ctx.strokeStyle = c.grid; ctx.lineWidth = 0.6; ctx.stroke();
 
-      // Land
+      // Land, painted in latitude bands clipped to the coastline
+      ctx.save();
+      ctx.beginPath(); path(window.MA_LAND); ctx.clip();
+      BANDS.forEach((b) => { ctx.beginPath(); path(b.geo); ctx.fillStyle = b.color; ctx.fill(); });
+      ctx.restore();
       ctx.beginPath(); path(window.MA_LAND);
-      ctx.fillStyle = c.land; ctx.fill();
-      ctx.strokeStyle = c.coast; ctx.lineWidth = 0.6; ctx.stroke();
+      ctx.strokeStyle = c.coast; ctx.lineWidth = 0.7; ctx.stroke();
 
-      // Shading for depth
-      const shade = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
-      shade.addColorStop(0, "rgba(255,255,255,0.07)");
-      shade.addColorStop(1, "rgba(0,0,0,0.18)");
+      // Sunlight and night-side shading for a round look
+      const shade = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.05, cx, cy, r);
+      shade.addColorStop(0, "rgba(255,255,255,0.22)");
+      shade.addColorStop(0.45, "rgba(255,255,255,0)");
+      shade.addColorStop(1, "rgba(0,10,30,0.35)");
       ctx.fillStyle = shade;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
 
@@ -148,22 +191,27 @@
           const flown = { type: "LineString", coordinates: line.coordinates.slice(0, k + 1) };
           const rest = { type: "LineString", coordinates: line.coordinates.slice(k) };
           ctx.setLineDash([3, 4]);
+          ctx.beginPath(); path(rest); ctx.strokeStyle = c.under; ctx.lineWidth = 3.5; ctx.stroke();
           ctx.beginPath(); path(rest); ctx.strokeStyle = rt.color; ctx.lineWidth = 1.5; ctx.stroke();
           ctx.setLineDash([]);
-          ctx.beginPath(); path(flown); ctx.lineWidth = 2.6; ctx.stroke();
+          ctx.beginPath(); path(flown); ctx.strokeStyle = c.under; ctx.lineWidth = 5; ctx.stroke();
+          ctx.beginPath(); path(flown); ctx.strokeStyle = rt.color; ctx.lineWidth = 2.6; ctx.stroke();
         } else {
-          ctx.beginPath(); path(line); ctx.strokeStyle = rt.color; ctx.lineWidth = rt.dim ? 1.2 : 2.2; ctx.stroke();
+          const w = rt.dim ? 1.3 : 2.2;
+          ctx.beginPath(); path(line); ctx.strokeStyle = c.under; ctx.lineWidth = w + 2.4; ctx.stroke();
+          ctx.beginPath(); path(line); ctx.strokeStyle = rt.color; ctx.lineWidth = w; ctx.stroke();
         }
         [rt.from, rt.to].forEach((p) => {
           if (!visible(p)) return;
           const [x, y] = proj([p.lon, p.lat]);
           ctx.beginPath(); ctx.arc(x, y, rt.dim ? 2 : 3.2, 0, Math.PI * 2);
-          ctx.fillStyle = c.bg; ctx.fill();
-          ctx.lineWidth = 1.6; ctx.strokeStyle = rt.color; ctx.stroke();
+          ctx.fillStyle = rt.color; ctx.fill();
+          ctx.lineWidth = 1.6; ctx.strokeStyle = c.under; ctx.stroke();
           if (rt.labels && p.iata) {
-            ctx.font = "600 11px " + css("--font-mono");
-            ctx.fillStyle = c.fg; ctx.textAlign = "center";
-            ctx.fillText(p.iata, x, y - 8);
+            ctx.font = "700 11px " + css("--font-mono");
+            ctx.textAlign = "center"; ctx.lineJoin = "round";
+            ctx.lineWidth = 3; ctx.strokeStyle = c.under; ctx.strokeText(p.iata, x, y - 8);
+            ctx.fillStyle = "#FFFFFF"; ctx.fillText(p.iata, x, y - 8);
           }
         });
         ctx.globalAlpha = 1;
@@ -179,7 +227,7 @@
         const pulse = this.reduce ? 0.5 : (Math.sin(ts / 420) + 1) / 2;
         ctx.beginPath(); ctx.arc(x, y, 11 + pulse * 6, 0, Math.PI * 2);
         ctx.fillStyle = pl.color; ctx.globalAlpha = 0.18; ctx.fill(); ctx.globalAlpha = 1;
-        drawPlane(ctx, x, y, ang, 13, pl.color, c.bg);
+        drawPlane(ctx, x, y, ang, 14, pl.color, c.under);
       });
     }
   }

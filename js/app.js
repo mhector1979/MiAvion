@@ -171,7 +171,7 @@
 
   function routeFor(d, st, opts) {
     const A = MA.AIRPORTS[d.from], B = MA.AIRPORTS[d.to];
-    const color = getComputedStyle(document.documentElement).getPropertyValue(st && st.tone && st.tone !== "ok" && !st.done ? "--" + st.tone : "--accent").trim();
+    const color = getComputedStyle(document.documentElement).getPropertyValue(st && st.tone && st.tone !== "ok" && !st.done ? "--" + st.tone : "--route").trim();
     return Object.assign({
       from: { lat: A.lat, lon: A.lon, iata: A.iata }, to: { lat: B.lat, lon: B.lon, iata: B.iata },
       color, progress: st && st.phase === "airborne" ? st.progress : null,
@@ -180,7 +180,7 @@
   function planeFor(d, st, now) {
     const tm = MA.telemetry(d, st, now);
     const B = MA.AIRPORTS[d.to];
-    const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    const color = getComputedStyle(document.documentElement).getPropertyValue("--route").trim();
     return { lat: tm.pos.lat, lon: tm.pos.lon, next: MA.interpolate(tm.pos, B, 0.02), color };
   }
 
