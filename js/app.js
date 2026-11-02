@@ -31,7 +31,8 @@
     // code, from, to, departure offset from now, delay (min), reason
     ["IB6403", "MAD", "MEX", -4.3 * HOUR, 12],
     ["AM565", "MEX", "CUN", 2 * HOUR + 50 * MIN, 25, "Late-arriving aircraft"],
-    ["UA901", "SFO", "FRA", 3 * DAY + 2 * HOUR, 0],
+    ["UA901", "SFO", "FRA", 3 * DAY + 2 * HOUR, 0, null, "Ana"],
+    ["AV19", "BOG", "MAD", -3 * HOUR, 20, "Weather at destination", "Carlos"],
     ["AM2", "MEX", "LAX", -24 * DAY, 4],
     ["AA2496", "LAX", "JFK", -21 * DAY, 38],
     ["BA112", "JFK", "LHR", -17 * DAY, -6],
@@ -40,7 +41,7 @@
     ["AM643", "CUN", "MEX", -184 * DAY, 22],
     ["AV245", "BOG", "LIM", -260 * DAY, 3],
     ["LA2369", "LIM", "SCL", -255 * DAY, 0],
-    ["LA800", "SCL", "SYD", -248 * DAY, 51],
+    ["LA800", "SCL", "SYD", -248 * DAY, 51, null, "Carlos"],
     ["QF11", "SYD", "LAX", -236 * DAY, 8],
     ["AM179", "LAX", "MEX", -235 * DAY, 0],
     ["CM117", "PTY", "BOG", -420 * DAY, 0],
@@ -52,11 +53,11 @@
       const dep = ANCHOR + Math.round(r[3] / (5 * MIN)) * 5 * MIN;
       const date = MA.localDate(dep, MA.AIRPORTS[r[1]].tz);
       const data = MA.simulate(r[0], date, { from: r[1], to: r[2], depUtc: dep, delay: r[4], reason: r[5] });
-      return { id: "sample" + i, sample: true, code: r[0], date, data };
+      return { id: "sample" + i, sample: true, code: r[0], date, data, who: r[6] || "" };
     }).filter((f) => !store.hiddenSamples.includes(f.id));
   }
   function userFlights() {
-    return store.flights.map((f) => Object.assign({}, f, { data: f.data && f.data.source === "live" ? f.data : MA.simulate(f.code, f.date, f.opts) }));
+    return store.flights.map((f) => Object.assign({}, f, { who: f.who || "", data: f.data && f.data.source === "live" ? f.data : MA.simulate(f.code, f.date, f.opts) }));
   }
   function allFlights() { return userFlights().concat(samples()); }
   function findFlight(id) { return allFlights().find((f) => f.id === id); }
@@ -90,6 +91,21 @@
     const m = Math.round(d / 30);
     return m < 18 ? m + " months ago" : Math.round(d / 365) + " years ago";
   }
+  // People: "" means the flight is yours; any other value is who is flying.
+  function knownPeople() {
+    const names = [];
+    store.flights.forEach((f) => { if (f.who && !names.includes(f.who)) names.push(f.who); });
+    return names;
+  }
+  function initials(name) {
+    const parts = String(name).trim().split(/\s+/);
+    return ((parts[0] || "")[0] + ((parts[1] || "")[0] || "")).toUpperCase();
+  }
+  function avatar(name, cls) {
+    const hue = MA.hash(name) % 360;
+    return '<span class="av' + (cls ? " " + cls : "") + '" style="--av:hsl(' + hue + ' 52% 44%)" title="' + esc(name) + '">' + esc(initials(name)) + "</span>";
+  }
+  function cleanName(v) { return String(v || "").replace(/\s+/g, " ").trim().slice(0, 24); }
   function prettyCode(code) { return code.slice(0, 2) + " " + code.slice(2); }
 
   function whenText(f, st, now) {
@@ -148,8 +164,8 @@
     return (
       '<a class="card' + (st.live ? " live" : "") + '" href="#f-' + esc(f.id) + '" style="--al:' + esc(d.airline.color) + '">' +
         '<div class="card-top">' +
-          '<span class="al-chip">' + esc(d.airline.iata) + "</span>" +
-          '<div class="card-id"><b>' + esc(prettyCode(d.code)) + "</b><span>" + esc(d.airline.name) + " · " + fmtDate(d.dep.sched, A.tz) + "</span></div>" +
+          '<span class="al-chip">' + esc(d.airline.iata) + (f.who ? avatar(f.who, "on-chip") : "") + "</span>" +
+          '<div class="card-id"><b>' + esc(prettyCode(d.code)) + "</b><span>" + (f.who ? '<em class="who">' + esc(f.who) + "</em> · " : "") + esc(d.airline.name) + " · " + fmtDate(d.dep.sched, A.tz) + "</span></div>" +
           pill(st) +
         "</div>" +
         '<div class="route">' +
@@ -206,22 +222,32 @@
 
     function tick() {
       const now = Date.now();
-      const list = allFlights().map((f) => ({ f, st: MA.status(f.data, now) }));
+      const every = allFlights();
+      const mineCount = every.filter((f) => !f.who).length, friendsCount = every.length - mineCount;
+      const tab = store.settings.who === "friends" ? "friends" : "mine";
+      const list = every.filter((f) => (tab === "friends" ? !!f.who : !f.who)).map((f) => ({ f, st: MA.status(f.data, now) }));
       const live = list.filter((x) => x.st.live).sort((a, b) => a.st.dep - b.st.dep);
       const upcoming = list.filter((x) => !x.st.live && x.st.phase !== "arrived" && x.st.arr > now).sort((a, b) => a.st.dep - b.st.dep);
       const past = list.filter((x) => !x.st.live && !upcoming.includes(x)).sort((a, b) => b.st.dep - a.st.dep);
 
-      const showSamples = store.settings.samples && list.some((x) => x.f.sample);
+      const showSamples = store.settings.samples && every.some((f) => f.sample);
       const sec = (title, items, empty) =>
         '<section class="section"><h2>' + title + ' <span class="count">' + items.length + "</span></h2>" +
         (items.length ? items.map((x) => card(x.f, now)).join("") : empty || "") + "</section>";
 
+      const emptyUp = tab === "friends"
+        ? '<div class="empty"><b>No upcoming flights from friends</b>Tap + and choose "Someone else" to follow a friend or family member.</div>'
+        : '<div class="empty"><b>No upcoming flights</b>Tap + and enter a flight number, like IB6403.</div>';
       $("#home-body").innerHTML =
+        '<div class="seg who-seg" role="group" aria-label="Whose flights">' +
+          '<button data-who="mine" aria-pressed="' + (tab === "mine") + '">My flights <span class="count">' + mineCount + "</span></button>" +
+          '<button data-who="friends" aria-pressed="' + (tab === "friends") + '">Friends <span class="count">' + friendsCount + "</span></button>" +
+        "</div>" +
         (showSamples
           ? '<div class="banner"><p>These are sample trips with simulated data. Add a flight with the + button to start your own.</p><button class="link-btn" data-act="hide-samples">Hide samples</button></div>'
           : "") +
         (live.length ? sec("In progress", live) : "") +
-        sec("Upcoming", upcoming, '<div class="empty"><b>No upcoming flights</b>Tap + and enter a flight number, like IB6403.</div>') +
+        sec("Upcoming", upcoming, emptyUp) +
         (past.length ? sec("Past", past.slice(0, 12)) : "");
 
       // Globe: live + upcoming routes, planes for airborne flights.
@@ -238,8 +264,15 @@
       }
       $("#globe-cap").textContent = live.length
         ? live.length + (live.length > 1 ? " flights" : " flight") + " in progress"
-        : upcoming.length ? "Next: " + prettyCode(upcoming[0].f.data.code) + " · " + whenText(upcoming[0].f, upcoming[0].st, now).toLowerCase() : "Add a flight to see it here";
+        : upcoming.length ? "Next: " + (upcoming[0].f.who ? upcoming[0].f.who + " · " : "") + prettyCode(upcoming[0].f.data.code) + " · " + whenText(upcoming[0].f, upcoming[0].st, now).toLowerCase()
+        : tab === "friends" ? "Friends' flights appear here" : "Add a flight to see it here";
     }
+    main().onclick = (e) => {
+      const b = e.target.closest("[data-who]");
+      if (!b) return;
+      store.settings.who = b.dataset.who; save();
+      focused = false; tick();
+    };
     tick();
     return { name: "flights", tick };
   }
@@ -347,6 +380,7 @@
       $("#detail-body").innerHTML =
         '<div class="d-head">' +
           '<div class="d-meta"><span class="al-chip" style="--al:' + esc(d.airline.color) + '">' + esc(d.airline.iata) + "</span><b>" + esc(prettyCode(d.code)) + "</b><span>" + esc(d.airline.name) + " · " + fmtDate(d.dep.sched, A.tz, { year: "numeric" }) + "</span>" + (f.sample ? '<span class="tag">Sample</span>' : "") + "</div>" +
+          (f.who ? '<div class="d-who">' + avatar(f.who) + "<span><b>" + esc(f.who) + "</b> is on this flight</span></div>" : "") +
           '<div class="d-route"><span>' + esc(d.from) + '</span><span class="arrow">→</span><span>' + esc(d.to) + "</span></div>" +
           '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + pill(st) + '<span class="d-sub">' + esc(A.city) + " to " + esc(B.city) + " · " + dist(d.km) + "</span></div>" +
           '<p class="d-headline">' + headline(f, st, now) + "</p>" +
@@ -372,6 +406,7 @@
             "<div><span>Time difference</span><b>" + tzDiff(A.tz, B.tz, d.dep.sched) + "</b></div>" +
             "<div><span>Cruise</span><b>" + (d.cruiseFt || 37000).toLocaleString("en-US") + " ft</b></div>" +
           "</div></section>" +
+          (f.sample ? "" : whoPanel(f.who)) +
           '<p class="note" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + esc(sourceLine) +
             (d.source === "live" ? ' <button class="link-btn" data-act="refresh">Refresh</button>' : "") + "</p>" +
           (f.sample
@@ -381,9 +416,16 @@
     }
 
     main().onclick = async (e) => {
+      const pick = e.target.closest("[data-pick-who]");
+      if (pick) { setWho(pick.dataset.pickWho); return; }
       const b = e.target.closest("[data-act]");
       if (!b) return;
       const f = findFlight(id);
+      if (b.dataset.act === "who-add") {
+        const v = cleanName($("#who-new").value);
+        if (!v) { $("#who-new").focus(); return; }
+        setWho(v); return;
+      }
       if (b.dataset.act === "delete") {
         if (!armed) { armed = true; tick(); setTimeout(() => { armed = false; if (view && view.name === "detail") tick(); }, 4000); return; }
         store.flights = store.flights.filter((x) => x.id !== id); save();
@@ -401,8 +443,29 @@
         tick();
       }
     };
+    function setWho(name) {
+      const s = store.flights.find((x) => x.id === id);
+      if (!s) return;
+      s.who = cleanName(name); save();
+      toast(s.who ? "Saved as " + s.who + "'s flight" : "Saved as your flight");
+      tick();
+    }
+    main().onkeydown = (e) => {
+      if (e.key === "Enter" && e.target.id === "who-new") { e.preventDefault(); const v = cleanName(e.target.value); if (v) setWho(v); }
+    };
     tick();
     return { name: "detail", tick };
+  }
+
+  // Chips to choose who is on a flight: you, someone you've used before, or a new name.
+  function whoChips(current, attr) {
+    return '<button type="button" class="chip" ' + attr + '="" aria-pressed="' + !current + '">Me</button>' +
+      knownPeople().map((n) => '<button type="button" class="chip" ' + attr + '="' + esc(n) + '" aria-pressed="' + (current === n) + '">' + esc(n) + "</button>").join("");
+  }
+  function whoPanel(current) {
+    return '<section class="panel"><h3>Who\'s flying</h3><div class="chips">' + whoChips(current, "data-pick-who") + "</div>" +
+      '<div class="who-new"><input id="who-new" class="input" placeholder="Add a name, like Ana" maxlength="24" autocomplete="off"><button class="btn" data-act="who-add" type="button">Save</button></div>' +
+      '<p class="hint">Friends\' flights stay out of your logbook.</p></section>';
   }
 
   function tzDiff(a, b, ts) {
@@ -425,7 +488,7 @@
     function tick() {
       const now = Date.now();
       const year = new Date(now).getFullYear();
-      const flown = allFlights().filter((f) => { const st = MA.status(f.data, now); return st.done && !f.data.cancelled; });
+      const flown = allFlights().filter((f) => { const st = MA.status(f.data, now); return !f.who && st.done && !f.data.cancelled; });
       const set = logRange === "year" ? flown.filter((f) => new Date(f.data.dep.sched).getFullYear() === year) : flown;
 
       const km = set.reduce((s, f) => s + f.data.km, 0);
@@ -498,6 +561,10 @@
             '<button type="button" class="chip" data-day="-1">Yesterday</button><button type="button" class="chip" data-day="0" aria-pressed="true">Today</button><button type="button" class="chip" data-day="1">Tomorrow</button>' +
           "</div>" +
           '<input id="add-date" type="date" class="input" value="' + date + '"></div>' +
+        '<div class="field"><label for="add-who">Who\'s flying?</label>' +
+          '<div class="chips" id="who-chips">' + whoChips(store.settings.who === "friends" && knownPeople()[0] ? knownPeople()[0] : "", "data-who-pick") +
+            '<button type="button" class="chip" data-who-other aria-pressed="false">Someone else</button></div>' +
+          '<input id="add-who" class="input" placeholder="Their name, like Ana" maxlength="24" hidden></div>' +
         '<button class="btn primary block" id="add-find" type="submit">Find flight</button>' +
         '<p class="hint">' + (store.settings.apiKey ? "Searching live schedules from AeroDataBox." : "No live data key set, so results are simulated from the flight number. Add a key in Settings for real schedules.") + "</p>" +
         '<p class="error" id="add-error" hidden></p>' +
@@ -508,6 +575,13 @@
     setTimeout(() => code.focus(), 60);
     const syncChips = () => el.querySelectorAll("[data-day]").forEach((c) => c.setAttribute("aria-pressed", String(isoDay(+c.dataset.day) === dateIn.value)));
     el.addEventListener("click", (e) => {
+      const w = e.target.closest("[data-who-pick], [data-who-other]");
+      if (w) {
+        el.querySelectorAll("#who-chips .chip").forEach((x) => x.setAttribute("aria-pressed", String(x === w)));
+        const other = w.hasAttribute("data-who-other");
+        $("#add-who", el).hidden = !other;
+        if (other) $("#add-who", el).focus();
+      }
       const c = e.target.closest("[data-day]");
       if (c) { dateIn.value = isoDay(+c.dataset.day); syncChips(); }
       const a = e.target.closest("[data-add]");
@@ -541,7 +615,11 @@
     function addResult(d) {
       if (!d) return;
       const id = "f" + Date.now().toString(36);
-      store.flights.push({ id, code: d.code, date: d.date, data: d.source === "live" ? d : null, addedAt: Date.now() });
+      const picked = el.querySelector('#who-chips [aria-pressed="true"]');
+      const who = !picked ? "" : picked.hasAttribute("data-who-other") ? cleanName($("#add-who", el).value) : picked.getAttribute("data-who-pick");
+      if (picked && picked.hasAttribute("data-who-other") && !who) { toast("Type the person's name first"); $("#add-who", el).focus(); return; }
+      store.flights.push({ id, code: d.code, date: d.date, who, data: d.source === "live" ? d : null, addedAt: Date.now() });
+      store.settings.who = who ? "friends" : "mine";
       save(); closeSheet(); toast("Added " + prettyCode(d.code));
       location.hash = "f-" + id;
     }
@@ -623,6 +701,7 @@
   function route() {
     const h = location.hash.replace(/^#/, "");
     main().onclick = null;
+    main().onkeydown = null;
     window.scrollTo(0, 0);
     if (h.startsWith("f-")) { renderTop("detail"); view = viewDetail(h.slice(2)); }
     else if (h === "logbook") { renderTop("logbook"); view = viewLogbook(); }

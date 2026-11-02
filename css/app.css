@@ -366,3 +366,18 @@ a.card:active { transform: scale(0.99); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- people (friends' flights) ---------- */
+.who-seg { margin-top: 6px; }
+.who-seg .count { color: var(--faint); font-weight: 600; margin-left: 2px; }
+.al-chip { position: relative; }
+.av {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--av, var(--faint)); color: #fff; font: 700 10.5px var(--font-body); letter-spacing: 0.02em; flex: none;
+}
+.av.on-chip { position: absolute; right: -8px; bottom: -8px; width: 22px; height: 22px; font-size: 9px; border: 2px solid var(--surface); }
+.card-id .who { font-style: normal; font-weight: 600; color: var(--fg); }
+.d-who { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.d-who b { color: var(--fg); }
+.who-new { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.who-new .input { min-height: 46px; font-size: 16px; }
