@@ -1,0 +1,11 @@
+{
+  "name": "MiAvion",
+  "short_name": "MiAvion",
+  "description": "Track your flights: live progress, gates, delays and a logbook.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0A111E",
+  "theme_color": "#0A111E",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
