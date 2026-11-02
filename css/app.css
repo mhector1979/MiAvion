@@ -108,10 +108,11 @@ a { color: inherit; text-decoration: none; }
 }
 .globe canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .globe canvas:active { cursor: grabbing; }
+.globe:has(.caption) canvas { height: calc(100% - 26px); }
 .globe .caption {
-  position: absolute; left: max(16px, env(safe-area-inset-left, 0px)); bottom: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); height: 26px;
   font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
-  pointer-events: none;
+  line-height: 26px; pointer-events: none;
 }
 .globe.small { height: 260px; }
 
@@ -353,6 +354,7 @@ a.card:active { transform: scale(0.99); }
 
 @media (min-width: 720px) {
   .globe { height: 400px; margin: 0; border-radius: 24px; }
+  .globe .caption { padding-left: 0; }
   .globe.small { height: 320px; }
   .d-route { font-size: 76px; }
 }

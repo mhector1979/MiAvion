@@ -4,11 +4,11 @@
   // Land color by latitude: ice caps, tundra, boreal and temperate forest,
   // subtropical deserts and the green equatorial belt.
   const LAND_RAMP = [
-    [-90, "#F4F8FA"], [-63, "#E8EFF2"], [-56, "#8C9F7A"], [-44, "#6A9550"],
+    [-90, "#F4F8FA"], [-66, "#E8EFF2"], [-54, "#8C9F7A"], [-44, "#6A9550"],
     [-30, "#B9A26C"], [-20, "#A9965E"], [-12, "#4E8A3C"], [0, "#2E7634"],
     [10, "#4C8A3A"], [17, "#B79E66"], [24, "#D2B57C"], [32, "#BFA673"],
-    [40, "#7EA057"], [52, "#4D7E44"], [62, "#5E7F52"], [68, "#8D9A7C"],
-    [73, "#D7DFDC"], [78, "#F4F8FA"], [90, "#F7FAFB"],
+    [40, "#7EA057"], [52, "#4D7E44"], [62, "#5E7F52"], [67, "#8D9A7C"],
+    [74, "#CFD8D4"], [81, "#F2F6F8"], [90, "#F7FAFB"],
   ];
   function rampColor(lat) {
     for (let i = 1; i < LAND_RAMP.length; i++) {
@@ -20,21 +20,12 @@
     }
     return LAND_RAMP[LAND_RAMP.length - 1][1];
   }
-  // Latitude bands (as small clockwise polygons) used to paint land.
-  const BAND_STEP = 2.5;
-  const BANDS = [];
-  for (let lat = -90; lat < 90; lat += BAND_STEP) {
-    const polys = [];
-    for (let lon = -180; lon < 180; lon += 90) {
-      const ring = [];
-      // Each band overlaps its neighbors slightly so no seams show between them.
-      const top = Math.min(90, lat + BAND_STEP + 1.2), bottom = Math.max(-90, lat - 0.2);
-      for (let x = lon; x <= lon + 90; x += 10) ring.push([x, top]);
-      for (let x = lon + 90; x >= lon; x -= 10) ring.push([x, bottom]);
-      ring.push(ring[0]);
-      polys.push([ring]);
-    }
-    BANDS.push({ geo: { type: "MultiPolygon", coordinates: polys }, color: rampColor(lat + BAND_STEP / 2) });
+  // Color lookup table: one RGB entry per 0.25° of latitude.
+  const LUT_STEP = 0.25;
+  const LUT = [];
+  for (let lat = -90; lat <= 90; lat += LUT_STEP) {
+    const c = d3.rgb(rampColor(lat));
+    LUT.push([c.r, c.g, c.b]);
   }
 
   function css(name) {
@@ -139,6 +130,39 @@
       requestAnimationFrame(this.loop);
     }
 
+    // Low-resolution image of land color by latitude for the current view.
+    // The coastline clip keeps edges sharp, so a coarse, smoothed field is enough.
+    landField(r) {
+      const n = Math.max(48, Math.min(240, Math.round(r * 0.8)));
+      const key = n + "|" + this.rotate[1].toFixed(2);
+      if (this.fieldKey === key) return this.field;
+      if (!this.field) this.field = document.createElement("canvas");
+      const f = this.field;
+      if (f.width !== n) { f.width = n; f.height = n; this.fieldData = f.getContext("2d").createImageData(n, n); }
+      const img = this.fieldData, px = img.data;
+      const latC = -this.rotate[1] * Math.PI / 180;
+      const sinC = Math.sin(latC), cosC = Math.cos(latC);
+      const last = LUT.length - 1;
+      for (let j = 0; j < n; j++) {
+        const y = 1 - ((j + 0.5) / n) * 2;
+        for (let i = 0; i < n; i++) {
+          const x = ((i + 0.5) / n) * 2 - 1;
+          const z = Math.sqrt(Math.max(0, 1 - x * x - y * y));
+          const lat = Math.asin(Math.max(-1, Math.min(1, y * cosC + z * sinC))) * 180 / Math.PI;
+          const k = (lat + 90) / LUT_STEP;
+          const k0 = Math.min(last, Math.floor(k)), k1 = Math.min(last, k0 + 1), t = k - k0;
+          const a = LUT[k0], b = LUT[k1], o = (j * n + i) * 4;
+          px[o] = a[0] + (b[0] - a[0]) * t;
+          px[o + 1] = a[1] + (b[1] - a[1]) * t;
+          px[o + 2] = a[2] + (b[2] - a[2]) * t;
+          px[o + 3] = 255;
+        }
+      }
+      f.getContext("2d").putImageData(img, 0, 0);
+      this.fieldKey = key;
+      return f;
+    }
+
     draw(ts) {
       const { ctx, c, proj, path } = this;
       proj.rotate(this.rotate);
@@ -167,7 +191,8 @@
       // Land, painted in latitude bands clipped to the coastline
       ctx.save();
       ctx.beginPath(); path(window.MA_LAND); ctx.clip();
-      BANDS.forEach((b) => { ctx.beginPath(); path(b.geo); ctx.fillStyle = b.color; ctx.fill(); });
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(this.landField(r), cx - r, cy - r, r * 2, r * 2);
       ctx.restore();
       ctx.beginPath(); path(window.MA_LAND);
       ctx.strokeStyle = c.coast; ctx.lineWidth = 0.7; ctx.stroke();
